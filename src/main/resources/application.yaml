@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: notify
+  config:
+    import: optional:file:.env[.properties]
+  rabbitmq:
+    host: ${RABBITMQ_HOST:100.62.195.17}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual
+
+retry:
+  max-attempts: ${RETRY_MAX_ATTEMPTS:3}
+  delay-ms: ${RETRY_DELAY_MS:5000}
+
+tickets:
+  dir: ${TICKETS_DIR:./data/tickets}
+
+labels:
+  dir: ${LABELS_DIR:./data/labels}
