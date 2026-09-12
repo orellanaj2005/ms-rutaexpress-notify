@@ -205,3 +205,12 @@ docker run --env-file .env rutaexpress/notify:latest
 ```
 
 Sin `EXPOSE`: `notify-svc` no publica puertos en `infra/apps/compose.yml` (es un consumidor puro).
+
+## Registro de cambios
+
+### 2026-09-12 — Implementación inicial (Jassack)
+Se construyó el microservicio completo desde cero según lo pedido: consumidor de las 3 colas de
+comando, declarando toda la topología oficial de RabbitMQ definida en
+`docs/guia_javier_rutaexpress.md` (exchanges `cmd.direct`/`cmd.topic`/`cmd.dead.dlx`, colas, DLQ),
+con idempotencia en memoria, ACK/NACK manual explícito, y reintentos con backoff que caen a la
+DLQ nativa tras agotar los intentos.
