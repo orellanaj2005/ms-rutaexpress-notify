@@ -11,6 +11,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import static cl.rutaexpress.notify.messaging.RabbitConstants.EXCHANGE_DIRECT;
 import static cl.rutaexpress.notify.messaging.RabbitConstants.EXCHANGE_DLX;
 import static cl.rutaexpress.notify.messaging.RabbitConstants.EXCHANGE_TOPIC;
@@ -55,6 +58,13 @@ public class RabbitTopologyConfig {
 
     @Value("${retry.delay-ms:5000}")
     private long delayMs;
+
+    // Jackson's autoconfiguration needs spring-web on the classpath (Jackson2ObjectMapperBuilder),
+    // which this service doesn't have since it has no HTTP starter — declared explicitly instead.
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper().registerModule(new JavaTimeModule());
+    }
 
     @Bean
     public Declarables rabbitTopology() {
