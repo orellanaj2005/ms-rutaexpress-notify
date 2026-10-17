@@ -1,8 +1,9 @@
-package cl.rutaexpress.notify.listener;
+package cl.rutaexpress.notify.consumer.bodega;
 
-import cl.rutaexpress.notify.handler.EmailSender;
+import cl.rutaexpress.notify.handler.PickingTicketGenerator;
 import cl.rutaexpress.notify.idempotency.DedupService;
-import cl.rutaexpress.notify.messaging.RabbitConstants;
+import cl.rutaexpress.notify.consumer.TestRabbitProperties;
+import cl.rutaexpress.notify.consumer.common.AbstractCommandListener;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rabbitmq.client.Channel;
@@ -17,6 +18,7 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,24 +29,24 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class EmailCommandListenerTest {
+class WarehouseCommandListenerTest {
 
-    private static final int MAX_ATTEMPTS = 3;
+    private static final int MAX_ATTEMPTS = TestRabbitProperties.MAX_ATTEMPTS;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private RabbitTemplate rabbitTemplate;
     private DedupService dedupService;
-    private EmailSender emailSender;
+    private PickingTicketGenerator ticketGenerator;
     private Channel channel;
-    private EmailCommandListener listener;
+    private WarehouseCommandListener listener;
 
     @BeforeEach
     void setUp() {
         rabbitTemplate = mock(RabbitTemplate.class);
         dedupService = mock(DedupService.class);
-        emailSender = mock(EmailSender.class);
+        ticketGenerator = mock(PickingTicketGenerator.class);
         channel = mock(Channel.class);
-        listener = new EmailCommandListener(objectMapper, rabbitTemplate, dedupService, emailSender, MAX_ATTEMPTS);
+        listener = new WarehouseCommandListener(objectMapper, rabbitTemplate, dedupService, ticketGenerator, TestRabbitProperties.create());
     }
 
     @Test
@@ -54,7 +56,7 @@ class EmailCommandListenerTest {
 
         listener.onMessage(message, channel);
 
-        verify(emailSender).send(eq("SHP-1"), eq("a@b.com"), eq("Ana"), eq("DELIVERED"), anyString());
+        verify(ticketGenerator).generate(eq("SHP-1"), eq("evt-1"), eq("Origin 1"), eq("Dest 1"), eq(12.5));
         verify(dedupService).markProcessed("evt-1");
         verify(channel).basicAck(1L, false);
         verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
@@ -67,21 +69,21 @@ class EmailCommandListenerTest {
 
         listener.onMessage(message, channel);
 
-        verifyNoInteractions(emailSender);
+        verifyNoInteractions(ticketGenerator);
         verify(channel).basicAck(1L, false);
         verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
     }
 
     @Test
     void failureBelowMaxAttemptsRepublishesToRetryQueueAndAcksOriginal() throws Exception {
-        Message message = buildMessage("evt-2", 0);
+        Message message = buildMessage("evt-2", 1);
         when(dedupService.isDuplicate("evt-2")).thenReturn(false);
-        doThrow(new RuntimeException("smtp down"))
-                .when(emailSender).send(any(), any(), any(), any(), any());
+        doThrow(new RuntimeException("disk full"))
+                .when(ticketGenerator).generate(any(), any(), any(), any(), anyDouble());
 
         listener.onMessage(message, channel);
 
-        verify(rabbitTemplate).convertAndSend(eq(""), eq(RabbitConstants.QUEUE_EMAIL_RETRY), any(Message.class));
+        verify(rabbitTemplate).convertAndSend(eq(""), eq("q.cmd.warehouse.retry"), any(Message.class));
         verify(channel).basicAck(1L, false);
         verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
         verify(dedupService, never()).markProcessed(anyString());
@@ -91,8 +93,8 @@ class EmailCommandListenerTest {
     void failureAtMaxAttemptsNacksWithoutRequeueAndDoesNotRepublish() throws Exception {
         Message message = buildMessage("evt-3", MAX_ATTEMPTS);
         when(dedupService.isDuplicate("evt-3")).thenReturn(false);
-        doThrow(new RuntimeException("smtp down"))
-                .when(emailSender).send(any(), any(), any(), any(), any());
+        doThrow(new RuntimeException("disk full"))
+                .when(ticketGenerator).generate(any(), any(), any(), any(), anyDouble());
 
         listener.onMessage(message, channel);
 
@@ -104,12 +106,11 @@ class EmailCommandListenerTest {
     private Message buildMessage(String eventId, Integer retryCount) throws Exception {
         Map<String, Object> payload = Map.of(
                 "shipmentId", "SHP-1",
-                "recipientEmail", "a@b.com",
-                "recipientName", "Ana",
-                "event", "DELIVERED",
-                "message", "Tu pedido fue entregado");
+                "originAddress", "Origin 1",
+                "destinationAddress", "Dest 1",
+                "weightKg", 12.5);
         Map<String, Object> envelope = Map.of(
-                "type", "EmailSendCommand",
+                "type", "WarehouseTicketCommand",
                 "eventId", eventId,
                 "timestamp", Instant.now().toString(),
                 "traceId", "trace-1",
@@ -120,7 +121,7 @@ class EmailCommandListenerTest {
         MessageProperties properties = new MessageProperties();
         properties.setDeliveryTag(1L);
         if (retryCount != null) {
-            properties.setHeader(RabbitConstants.HEADER_RETRY_COUNT, retryCount);
+            properties.setHeader(AbstractCommandListener.HEADER_RETRY_COUNT, retryCount);
         }
         return new Message(body, properties);
     }

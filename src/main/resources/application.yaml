@@ -4,17 +4,44 @@ spring:
   config:
     import: optional:file:.env[.properties]
   rabbitmq:
-    host: ${RABBITMQ_HOST:100.62.195.17}
-    port: ${RABBITMQ_PORT:5672}
+    # Lista de nodos del clúster: si el primero no responde, Spring se conecta al siguiente.
+    addresses: ${RABBITMQ_ADDRESSES:localhost:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
     listener:
       simple:
         acknowledge-mode: manual
 
-retry:
-  max-attempts: ${RETRY_MAX_ATTEMPTS:3}
-  delay-ms: ${RETRY_DELAY_MS:5000}
+# Contrato de topología RabbitMQ (mismos nombres y estructura en todos los microservicios).
+rutaexpress:
+  rabbitmq:
+    exchanges:
+      direct: cmd.direct
+      topic: cmd.topic
+      dead-letter: cmd.dead.dlx
+    email:
+      queue: q.cmd.email
+      routing-key: email.send
+      pattern: email.*
+      dlq: q.cmd.email.dlq
+      retry-queue: q.cmd.email.retry
+    warehouse:
+      queue: q.cmd.warehouse
+      routing-key: warehouse.ticket
+      pattern: warehouse.#
+      dlq: q.cmd.warehouse.dlq
+      retry-queue: q.cmd.warehouse.retry
+    label:
+      queue: q.cmd.label
+      routing-key: label.gen
+      pattern: label.*
+      dlq: q.cmd.label.dlq
+      retry-queue: q.cmd.label.retry
+    audit:
+      dead-letter-queue: q.audit.deadletter
+    retry:
+      max-attempts: ${RETRY_MAX_ATTEMPTS:3}
+      delay-ms: ${RETRY_DELAY_MS:5000}
 
 tickets:
   dir: ${TICKETS_DIR:./data/tickets}

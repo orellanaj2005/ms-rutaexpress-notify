@@ -1,48 +1,54 @@
-package cl.rutaexpress.notify.listener;
+package cl.rutaexpress.notify.consumer.notificacion;
 
+import cl.rutaexpress.notify.config.RabbitProperties;
+import cl.rutaexpress.notify.consumer.common.AbstractCommandListener;
+import cl.rutaexpress.notify.consumer.common.NonRecoverableMessageException;
 import cl.rutaexpress.notify.handler.EmailSender;
 import cl.rutaexpress.notify.idempotency.DedupService;
 import cl.rutaexpress.notify.messaging.CommandEnvelope;
-import cl.rutaexpress.notify.messaging.RabbitConstants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 
 /**
- * Consumes {@code q.cmd.email}: type {@code "EmailSendCommand"}, payload
- * {@code {shipmentId, recipientEmail, recipientName, event, message}}.
+ * Dominio notificación: consume {@code q.cmd.email} (tipo {@code EmailSendCommand}). Payload:
+ * {@code {shipmentId, recipientEmail, recipientName, event, message}}. Sin destinatario va a la DLQ.
  */
 @Component
 public class EmailCommandListener extends AbstractCommandListener {
 
     private final EmailSender emailSender;
+    private final RabbitProperties.Route route;
 
     public EmailCommandListener(ObjectMapper objectMapper,
-                                 RabbitTemplate rabbitTemplate,
-                                 DedupService dedupService,
-                                 EmailSender emailSender,
-                                 @Value("${retry.max-attempts:3}") int maxAttempts) {
-        super(objectMapper, rabbitTemplate, dedupService, maxAttempts);
+                                RabbitTemplate rabbitTemplate,
+                                DedupService dedupService,
+                                EmailSender emailSender,
+                                RabbitProperties properties) {
+        super(objectMapper, rabbitTemplate, dedupService, properties);
         this.emailSender = emailSender;
+        this.route = properties.email();
     }
 
-    @RabbitListener(queues = RabbitConstants.QUEUE_EMAIL)
+    @RabbitListener(queues = "${rutaexpress.rabbitmq.email.queue}")
     public void onMessage(Message message, Channel channel) throws IOException {
-        handle(message, channel, RabbitConstants.QUEUE_EMAIL, RabbitConstants.QUEUE_EMAIL_RETRY);
+        handle(message, channel, route);
     }
 
     @Override
     protected void process(CommandEnvelope envelope) {
         JsonNode payload = envelope.payload();
-        String shipmentId = payload.path("shipmentId").asText("");
         String recipientEmail = payload.path("recipientEmail").asText("");
+        if (recipientEmail.isBlank()) {
+            throw new NonRecoverableMessageException("payload sin destinatario");
+        }
+        String shipmentId = payload.path("shipmentId").asText("");
         String recipientName = payload.path("recipientName").asText("");
         String event = payload.path("event").asText("");
         String message = payload.path("message").asText("");
