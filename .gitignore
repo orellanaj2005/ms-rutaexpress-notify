@@ -36,3 +36,7 @@ build/
 .env
 application-local.yml
 application-local.properties
+
+### Comunes a los 12 repositorios de RutaExpress ###
+node_modules/
+bin/
