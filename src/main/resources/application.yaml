@@ -12,6 +12,31 @@ spring:
       simple:
         acknowledge-mode: manual
 
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # Grupo propio: notify recibe todos los eventos, independiente de audit y report.
+      group-id: ms-rutaexpress-notify
+      # Un grupo nuevo parte desde los mensajes nuevos: no se reenvían correos de eventos antiguos.
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      # ErrorHandlingDeserializer envuelve al deserializador real: si un mensaje no se puede leer,
+      # no bloquea la partición y el error handler lo manda a notify.DLT.
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+    # Productor usado solo para publicar en notify.DLT.
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+    listener:
+      # Confirma el offset de cada mensaje apenas termina (o apenas llega a notify.DLT).
+      ack-mode: record
+
 # Contrato de topología RabbitMQ (mismos nombres y estructura en todos los microservicios).
 rutaexpress:
   rabbitmq:
@@ -42,6 +67,12 @@ rutaexpress:
     retry:
       max-attempts: ${RETRY_MAX_ATTEMPTS:3}
       delay-ms: ${RETRY_DELAY_MS:5000}
+  kafka:
+    shipment-events-topic: shipments.events
+    dlt-topic: notify.DLT
+    concurrency: 3
+    # Estados de ShipmentStatusChanged que generan el comando de email hacia RabbitMQ.
+    email-states: ${NOTIFY_EMAIL_STATES:EN_RUTA,ENTREGADO,CANCELADO}
 
 tickets:
   dir: ${TICKETS_DIR:./data/tickets}
